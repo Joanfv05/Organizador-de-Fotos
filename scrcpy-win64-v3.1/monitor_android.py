@@ -3,6 +3,8 @@ import os
 import re
 from datetime import datetime
 from pathlib import Path
+from PIL import Image
+from PIL.ExifTags import TAGS
 import shutil
 
 ADB_PATH = "adb.exe"
@@ -59,6 +61,28 @@ def pull_file_from_device(remote_path, local_path):
     cmd = f'{ADB_PATH} pull "{remote_path}" "{local_path}"'
     return run_command(cmd)
 
+def get_image_date(image_path):
+    try:
+        image = Image.open(image_path)
+        exif_data = image._getexif()
+        if exif_data:
+            for tag, value in exif_data.items():
+                decoded_tag = TAGS.get(tag, tag)
+                if decoded_tag == "DateTimeOriginal":
+                    return datetime.strptime(value, "%Y:%m:%d %H:%M:%S")
+    except Exception:
+        pass
+    return None
+
+def get_video_date(file):
+    match = re.search(r'(\d{8})_(\d{6})', file.stem)
+    if match:
+        try:
+            return datetime.strptime(match.group(1) + match.group(2), "%Y%m%d%H%M%S")
+        except Exception:
+            pass
+    return datetime.fromtimestamp(file.stat().st_mtime)
+
 def extract_today_media_from_sd():
     if not check_device():
         return
@@ -68,8 +92,7 @@ def extract_today_media_from_sd():
         print("❌ No se encontró la carpeta DCIM/Camera en la SD externa.")
         return
 
-    hoy_str = datetime.now().strftime("%Y%m%d")
-    print(f"📆 Hoy es: {hoy_str}")
+    hoy = datetime.now().strftime("%Y%m%d")
     folder_name = datetime.now().strftime("%Y-%m-%d")
     local_dir = Path(folder_name)
     local_dir.mkdir(parents=True, exist_ok=True)
@@ -84,29 +107,69 @@ def extract_today_media_from_sd():
         if not any(filename.lower().endswith(ext) for ext in MEDIA_EXTENSIONS):
             continue
 
-        print(f"⏱ Procesando {filename}")
-        remote_path = f"{remote_dir}/{filename}"
-        temp_local = local_dir / filename
-
-        # Buscar fecha en el nombre del archivo (formato: IMG_YYYYMMDD_HHMMSS)
         match = re.search(r'(\d{8})_\d{6}', filename)
-        if match:
-            fecha_archivo = match.group(1)
-            print(f"📁 Fecha detectada en nombre: {fecha_archivo}")
-        else:
-            print(f"⚠️ No se detectó fecha válida en el nombre de {filename}, descartando.")
+        if not match:
             continue
 
-        # Si coincide con hoy, se descarga y se mantiene
-        if fecha_archivo == hoy_str:
-            pull_result = pull_file_from_device(remote_path, temp_local)
-            if "Error" in pull_result:
-                print(f"⚠️ Error extrayendo {filename}: {pull_result}")
-                continue
-            total += 1
-            print(f"✅ {filename} copiado.")
-        else:
-            print(f"🗑️ {filename} no es de hoy. Ignorado.")
+        if match.group(1) != hoy:
+            continue
+
+        remote_path = f"{remote_dir}/{filename}"
+        local_path = local_dir / filename
+        pull_result = pull_file_from_device(remote_path, local_path)
+        if "Error" in pull_result:
+            print(f"⚠️ Error extrayendo {filename}: {pull_result}")
+            continue
+        total += 1
+        print(f"✅ {filename} copiado.")
+
+    print(f"\n🎉 Proceso completado. {total} archivos copiados a '{folder_name}'.")
+
+def extract_media_from_specific_date():
+    if not check_device():
+        return
+
+    remote_dir = detect_sdcard_path()
+    if not remote_dir:
+        print("❌ No se encontró la carpeta DCIM/Camera en la SD externa.")
+        return
+
+    fecha_input = input("📅 Introduce la fecha deseada (formato YYYYMMDD): ").strip()
+    try:
+        datetime_obj = datetime.strptime(fecha_input, "%Y%m%d")
+    except ValueError:
+        print("❌ Fecha inválida. Asegúrate de usar el formato YYYYMMDD.")
+        return
+
+    folder_name = datetime_obj.strftime("%Y-%m-%d")
+    local_dir = Path(folder_name)
+    local_dir.mkdir(parents=True, exist_ok=True)
+
+    files = list_files_on_device(remote_dir)
+    if not files:
+        print("❌ No hay archivos en la carpeta remota.")
+        return
+
+    total = 0
+    for filename in files:
+        if not any(filename.lower().endswith(ext) for ext in MEDIA_EXTENSIONS):
+            continue
+
+        match = re.search(r'(\d{8})_\d{6}', filename)
+        if not match:
+            continue
+
+        if match.group(1) != fecha_input:
+            continue
+
+        remote_path = f"{remote_dir}/{filename}"
+        local_path = local_dir / filename
+        pull_result = pull_file_from_device(remote_path, local_path)
+        if "Error" in pull_result:
+            print(f"⚠️ Error extrayendo {filename}: {pull_result}")
+            continue
+        total += 1
+        print(f"✅ {filename} copiado.")
 
     print(f"\n🎉 Proceso completado. {total} archivos copiados a '{folder_name}'.")
 
@@ -136,7 +199,14 @@ def copy_and_organize_media():
 
     for file in files_to_move:
         if file.is_file():
-            date_taken = datetime.fromtimestamp(file.stat().st_mtime)
+            if file.suffix.lower() in [".jpg", ".jpeg", ".png", ".heic"]:
+                date_taken = get_image_date(file)
+            else:
+                date_taken = get_video_date(file)
+
+            if not date_taken:
+                date_taken = datetime.fromtimestamp(file.stat().st_mtime)
+
             month_number = date_taken.month
             month_folder = f"{month_number}-{MESES_ES[month_number]}"
             destination_folder = source / month_folder
@@ -159,9 +229,10 @@ def menu():
         print("\n--- MONITORIZAR MÓVIL ANDROID ---")
         print("1. Verificar dispositivo")
         print("2. Iniciar scrcpy")
-        print("3. Copiar y organizar fotos/vídeos (SD Card)")
+        print("3. Copiar y organizar fotos/vídeos (SD Card completa)")
         print("4. Copiar SOLO fotos y vídeos de HOY desde la SD")
-        print("5. Salir")
+        print("5. Copiar fotos/vídeos de una FECHA ESPECÍFICA desde la SD")
+        print("6. Salir")
 
         choice = input("Selecciona una opción: ")
 
@@ -175,6 +246,8 @@ def menu():
         elif choice == "4":
             extract_today_media_from_sd()
         elif choice == "5":
+            extract_media_from_specific_date()
+        elif choice == "6":
             print("👋 Saliendo...")
             break
         else:
