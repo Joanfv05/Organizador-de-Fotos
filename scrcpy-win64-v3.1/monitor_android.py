@@ -179,7 +179,7 @@ def copy_and_organize_media():
             if match:
                 year, month_str, _ = match.groups()
                 month_number = int(month_str)
-                folder_name = f"{year}-{month_number:02d}-{MESES_ES[month_number]}"
+                folder_name = f"{month_number}-{MESES_ES[month_number]}"
                 destination_folder = source / folder_name
             else:
                 destination_folder = source / "SinFecha"
@@ -197,7 +197,7 @@ def copy_and_organize_media():
 
             shutil.move(str(file), new_path)
 
-    print(f"✅ Archivos organizados por año y mes en '{LOCAL_BACKUP_DIR}'.")
+    print(f"✅ Archivos organizados por mes en '{LOCAL_BACKUP_DIR}'.")
 
 def menu():
     while True:
