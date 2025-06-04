@@ -3,8 +3,6 @@ import os
 import re
 from datetime import datetime
 from pathlib import Path
-from PIL import Image
-from PIL.ExifTags import TAGS
 import shutil
 
 ADB_PATH = "adb.exe"
@@ -60,28 +58,6 @@ def list_files_on_device(remote_dir):
 def pull_file_from_device(remote_path, local_path):
     cmd = f'{ADB_PATH} pull "{remote_path}" "{local_path}"'
     return run_command(cmd)
-
-def get_image_date(image_path):
-    try:
-        image = Image.open(image_path)
-        exif_data = image._getexif()
-        if exif_data:
-            for tag, value in exif_data.items():
-                decoded_tag = TAGS.get(tag, tag)
-                if decoded_tag == "DateTimeOriginal":
-                    return datetime.strptime(value, "%Y:%m:%d %H:%M:%S")
-    except Exception:
-        pass
-    return None
-
-def get_video_date(file):
-    match = re.search(r'(\d{8})_(\d{6})', file.stem)
-    if match:
-        try:
-            return datetime.strptime(match.group(1) + match.group(2), "%Y%m%d%H%M%S")
-        except Exception:
-            pass
-    return datetime.fromtimestamp(file.stat().st_mtime)
 
 def extract_today_media_from_sd():
     if not check_device():
@@ -199,20 +175,18 @@ def copy_and_organize_media():
 
     for file in files_to_move:
         if file.is_file():
-            if file.suffix.lower() in [".jpg", ".jpeg", ".png", ".heic"]:
-                date_taken = get_image_date(file)
+            match = re.search(r'(?:IMG|VID)_(\d{4})(\d{2})(\d{2})_\d{6}', file.stem)
+            if match:
+                year, month_str, _ = match.groups()
+                month_number = int(month_str)
+                folder_name = f"{year}-{month_number:02d}-{MESES_ES[month_number]}"
+                destination_folder = source / folder_name
             else:
-                date_taken = get_video_date(file)
+                destination_folder = source / "SinFecha"
 
-            if not date_taken:
-                date_taken = datetime.fromtimestamp(file.stat().st_mtime)
-
-            month_number = date_taken.month
-            month_folder = f"{month_number}-{MESES_ES[month_number]}"
-            destination_folder = source / month_folder
             destination_folder.mkdir(parents=True, exist_ok=True)
-
             new_path = destination_folder / file.name
+
             if new_path.exists():
                 base = file.stem
                 ext = file.suffix
@@ -220,9 +194,10 @@ def copy_and_organize_media():
                 while new_path.exists():
                     new_path = destination_folder / f"{base}_{counter}{ext}"
                     counter += 1
+
             shutil.move(str(file), new_path)
 
-    print(f"✅ Archivos organizados en carpetas mensuales: {', '.join(MESES_ES.values())}")
+    print(f"✅ Archivos organizados por año y mes en '{LOCAL_BACKUP_DIR}'.")
 
 def menu():
     while True:
