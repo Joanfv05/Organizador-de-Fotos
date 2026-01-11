@@ -1,0 +1,3 @@
+# Ignorar carpetas de fotos/vídeos generadas por el script
+[0-9][0-9][0-9][0-9]-[0-9][0-9]*/
+*[0-9][0-9]_METADATA_OK/
