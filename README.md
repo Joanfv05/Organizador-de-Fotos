@@ -100,5 +100,5 @@ Este script **no elimina archivos** del dispositivo, sólo los copia o restaura.
 ## 📌 Autor
 
 Joan Ferre
-[GitHub](https://github.com/Joanfv05>)
+[GitHub](https://github.com/Joanfv05)
 
