@@ -30,7 +30,7 @@ Este proyecto proporciona un **script en Python** para extraer, organizar y rest
 
 1. Clona el repositorio:
 ```bash
-git clone <https://github.com/Joanfv05/Organizador-de-Fotos.git>
+git clone https://github.com/Joanfv05/Organizador-de-Fotos.git
 cd scrcpy-win64-v3.1
 ````
 
