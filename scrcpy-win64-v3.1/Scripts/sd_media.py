@@ -5,8 +5,9 @@ from datetime import datetime
 from pathlib import Path
 import shutil
 
-ADB_PATH = "adb.exe"
-SCRCPY_PATH = "scrcpy.exe"
+BASE_DIR = Path(__file__).parent.parent  
+ADB_PATH = BASE_DIR / "adb.exe"
+SCRCPY_PATH = BASE_DIR / "scrcpy.exe"
 LOCAL_BACKUP_DIR = "Fotos Camara"
 MEDIA_EXTENSIONS = [".jpg", ".jpeg", ".png", ".mp4", ".mov", ".heic", ".avi", ".3gp"]
 FILENAME_DATE_REGEX = r'(?:[A-Z]+_)?(\d{8})_\d{6}.*'
@@ -218,65 +219,6 @@ def copy_and_organize_media():
 
     print(f"✅ {total} archivos del año {year_selected} organizados correctamente.")
 
-def copy_and_organize_whatsapp_media():
-    if not check_device():
-        return
-
-    WA_PATHS = [
-        "/storage/emulated/0/Android/media/com.whatsapp/WhatsApp/Media/WhatsApp Images",
-        "/storage/emulated/0/Android/media/com.whatsapp/WhatsApp/Media/WhatsApp Video"
-    ]
-    LOCAL_WA_DIR = "WhatsApp Media"
-    Path(LOCAL_WA_DIR).mkdir(parents=True, exist_ok=True)
-
-    # Copiar contenido
-    for remote_path in WA_PATHS:
-        print(f"📥 Copiando archivos desde {remote_path}...")
-        result = run_command(f'{ADB_PATH} pull "{remote_path}" "{LOCAL_WA_DIR}"')
-        print("Resultado adb pull:", result)
-
-    source = Path(LOCAL_WA_DIR)
-    if not source.exists():
-        print(f"❌ No se pudo encontrar la carpeta local '{LOCAL_WA_DIR}'.")
-        return
-
-    # Buscar fotos y vídeos
-    files_to_move = []
-    for ext in MEDIA_EXTENSIONS:
-        files_to_move.extend(source.rglob(f"*{ext}"))
-
-    for file in files_to_move:
-        if file.is_file():
-            # ⚠️ Ignorar archivos de papelera de WhatsApp
-            if file.name.startswith(".trashed-"):
-                continue
-
-            # Extraer fecha de nombres tipo IMG-YYYYMMDD-WAxxxx / VID-YYYYMMDD-WAxxxx
-            match = re.search(r'(?:IMG|VID)-(\d{4})(\d{2})(\d{2})-WA\d+', file.stem)
-            if match:
-                year, month_str, _ = match.groups()
-                month_number = int(month_str)
-                folder_name = f"{month_number:02d}-{MESES_ES[month_number]}"
-                destination_folder = source / folder_name
-            else:
-                destination_folder = source / "SinFecha"
-
-            destination_folder.mkdir(parents=True, exist_ok=True)
-            new_path = destination_folder / file.name
-
-            # Evitar sobrescribir archivos repetidos
-            if new_path.exists():
-                base = file.stem
-                ext = file.suffix
-                counter = 1
-                while new_path.exists():
-                    new_path = destination_folder / f"{base}_{counter}{ext}"
-                    counter += 1
-
-            shutil.move(str(file), new_path)
-
-    print(f"✅ Archivos de WhatsApp organizados por mes en '{LOCAL_WA_DIR}'.")
-
 def extract_media_from_specific_month():
     if not check_device():
         return
@@ -439,7 +381,7 @@ def menu():
         print("\n--- MONITORIZAR MÓVIL ANDROID ---")
         print("1. Verificar dispositivo")
         print("2. Iniciar scrcpy")
-        print("3. Copiar y organizar fotos/vídeos por AÑO y MES (SD Card completa)")
+        print("3. Copiar y organizar fotos/vídeos de un AÑO específico por MESES (SD Card)")
         print("4. Copiar SOLO fotos y vídeos de HOY desde la SD")
         print("5. Copiar fotos/vídeos de una FECHA ESPECÍFICA desde la SD")
         print("6. Copiar fotos/vídeos de un MES ESPECÍFICO desde la SD")
@@ -466,10 +408,8 @@ def menu():
         elif choice == "7":
             extract_media_from_specific_month_preserve_metadata()
         elif choice == "8":
-            copy_and_organize_whatsapp_media()
-        elif choice == "9":
             restore_media_to_device()
-        elif choice == "10":
+        elif choice == "9":
             print("👋 Saliendo...")
             break
         else:
