@@ -12,25 +12,29 @@ LOCAL_BACKUP_DIR = "Fotos Camara"
 MEDIA_EXTENSIONS = [".jpg", ".jpeg", ".png", ".mp4", ".mov", ".heic", ".avi", ".3gp"]
 FILENAME_DATE_REGEX = r'(?:[A-Z]+_)?(\d{8})_\d{6}.*'
 
-
 MESES_ES = {
     1: "Enero", 2: "Febrero", 3: "Marzo", 4: "Abril",
     5: "Mayo", 6: "Junio", 7: "Julio", 8: "Agosto",
     9: "Septiembre", 10: "Octubre", 11: "Noviembre", 12: "Diciembre"
 }
 
-def run_command(command):
+# --- FUNCIONES ---
+
+def run_command_list(cmd_list):
+    """Ejecuta un comando con subprocess.run usando lista de argumentos"""
     try:
-        result = subprocess.check_output(command, shell=True, text=True)
-        return result.strip()
-    except subprocess.CalledProcessError as e:
+        result = subprocess.run(cmd_list, capture_output=True, text=True)
+        if result.returncode != 0:
+            return f"Error: {result.stderr.strip()}"
+        return result.stdout.strip()
+    except Exception as e:
         return f"Error: {e}"
 
 def check_device():
     print("🔍 Buscando dispositivos conectados...")
-    result = run_command(f"{ADB_PATH} devices")
+    result = run_command_list([str(ADB_PATH), "devices"])
     print(result)
-    if "device" in result and not "unauthorized" in result:
+    if "device" in result and "unauthorized" not in result:
         print("✅ Dispositivo conectado.")
         return True
     elif "unauthorized" in result:
@@ -41,26 +45,36 @@ def check_device():
 
 def start_scrcpy():
     print("🚀 Iniciando scrcpy...")
-    os.system(SCRCPY_PATH)
+    result = subprocess.run([str(SCRCPY_PATH)])
+    if result.returncode != 0:
+        print(f"⚠️ Error al iniciar scrcpy: {result}")
 
 def detect_sdcard_path():
-    output = run_command(f"{ADB_PATH} shell ls /storage")
+    output = run_command_list([str(ADB_PATH), "shell", "ls", "/storage"])
     for line in output.splitlines():
         if "-" in line and len(line) == 9:
-            test = run_command(f'{ADB_PATH} shell ls "/storage/{line}/DCIM/Camera"')
+            test = run_command_list([str(ADB_PATH), "shell", "ls", f"/storage/{line}/DCIM/Camera"])
             if "No such file or directory" not in test:
                 return f"/storage/{line}/DCIM/Camera"
     return None
 
 def list_files_on_device(remote_dir):
-    output = run_command(f'{ADB_PATH} shell ls "{remote_dir}"')
+    output = run_command_list([str(ADB_PATH), "shell", "ls", remote_dir])
     if "No such file" in output or "Error" in output:
         return []
     return [line.strip() for line in output.splitlines() if line.strip()]
 
 def pull_file_from_device(remote_path, local_path):
-    cmd = f'{ADB_PATH} pull "{remote_path}" "{local_path}"'
-    return run_command(cmd)
+    local_path = str(local_path)
+    cmd = [str(ADB_PATH), "pull", remote_path, local_path]
+    return run_command_list(cmd)
+
+def push_file_to_device(local_path, remote_path):
+    local_path = str(local_path)
+    cmd = [str(ADB_PATH), "push", "-a", local_path, remote_path]
+    return run_command_list(cmd)
+
+# --- FUNCIONES DE EXTRACCIÓN ---
 
 def extract_today_media_from_sd():
     if not check_device():
@@ -156,68 +170,96 @@ def copy_and_organize_media():
     if not check_device():
         return
 
-    sd_camera_path = detect_sdcard_path()
-    if not sd_camera_path:
+    remote_dir = detect_sdcard_path()
+    if not remote_dir:
         print("❌ No se encontró la carpeta DCIM/Camera en la SD externa.")
         return
-
-    Path(LOCAL_BACKUP_DIR).mkdir(parents=True, exist_ok=True)
 
     year_selected = input("📅 Introduce el AÑO a organizar (YYYY): ").strip()
     if not (year_selected.isdigit() and len(year_selected) == 4):
         print("❌ Año inválido.")
         return
 
-    print(f"📥 Copiando archivos desde {sd_camera_path} a '{LOCAL_BACKUP_DIR}'...")
-    result = run_command(f'{ADB_PATH} pull "{sd_camera_path}" "{LOCAL_BACKUP_DIR}"')
-    print("Resultado adb pull:", result)
+    # Crear carpeta base local
+    base_dir = Path(LOCAL_BACKUP_DIR)
+    base_dir.mkdir(parents=True, exist_ok=True)
 
-    source = Path(LOCAL_BACKUP_DIR)
-    if not source.exists():
-        print(f"❌ No se pudo encontrar la carpeta local '{LOCAL_BACKUP_DIR}'.")
+    # Listar archivos del dispositivo
+    print(f"📋 Listando archivos en {remote_dir}...")
+    files = list_files_on_device(remote_dir)
+    
+    if not files:
+        print("❌ No hay archivos en la carpeta remota.")
         return
 
-    files_to_move = []
-    for ext in MEDIA_EXTENSIONS:
-        files_to_move.extend(source.rglob(f"*{ext}"))
-
-    total = 0
-    for file in files_to_move:
-        if not file.is_file():
+    # Filtrar archivos por año
+    files_to_copy = []
+    for filename in files:
+        # Ignorar archivos trashed
+        if filename.startswith(".trashed-"):
             continue
-
-        match = re.search(FILENAME_DATE_REGEX, file.stem)
+        
+        # Solo extensiones de media
+        if not any(filename.lower().endswith(ext) for ext in MEDIA_EXTENSIONS):
+            continue
+        
+        # Extraer fecha del nombre del archivo
+        match = re.search(FILENAME_DATE_REGEX, filename)
         if not match:
             continue
-
+        
         date_str = match.group(1)
         year = date_str[:4]
+        
+        # Solo archivos del año seleccionado
+        if year == year_selected:
+            files_to_copy.append(filename)
 
-        # 👉 SOLO el año elegido
-        if year != year_selected:
-            continue
+    if not files_to_copy:
+        print(f"❌ No se encontraron archivos del año {year_selected} en la SD.")
+        return
 
+    print(f"📥 Encontrados {len(files_to_copy)} archivos del año {year_selected}.")
+    print("⏳ Copiando y organizando...")
+
+    total_copied = 0
+    for filename in files_to_copy:
+        # Extraer información de fecha
+        match = re.search(FILENAME_DATE_REGEX, filename)
+        date_str = match.group(1)
+        
+        # Crear estructura de carpetas
         month_number = int(date_str[4:6])
         month_folder = f"{month_number:02d}-{MESES_ES[month_number]}"
-
-        destination_folder = source / year_selected / month_folder
+        
+        destination_folder = base_dir / year_selected / month_folder
         destination_folder.mkdir(parents=True, exist_ok=True)
-
-        new_path = destination_folder / file.name
-
+        
+        # Ruta destino final
+        local_path = destination_folder / filename
+        
         # Evitar sobrescrituras
-        if new_path.exists():
-            base = file.stem
-            ext = file.suffix
+        if local_path.exists():
+            base_name = Path(filename).stem
+            ext = Path(filename).suffix
             counter = 1
-            while new_path.exists():
-                new_path = destination_folder / f"{base}_{counter}{ext}"
+            while local_path.exists():
+                new_name = f"{base_name}_{counter}{ext}"
+                local_path = destination_folder / new_name
                 counter += 1
+        
+        # Copiar archivo desde el dispositivo
+        remote_path = f"{remote_dir}/{filename}"
+        pull_result = pull_file_from_device(remote_path, local_path)
+        
+        if "Error" in pull_result:
+            print(f"⚠️ Error copiando {filename}: {pull_result}")
+        else:
+            total_copied += 1
+            print(f"✅ {filename} copiado a {month_folder}")
 
-        shutil.move(str(file), new_path)
-        total += 1
-
-    print(f"✅ {total} archivos del año {year_selected} organizados correctamente.")
+    print(f"\n🎉 Proceso completado.")
+    print(f"📁 {total_copied} archivos del año {year_selected} organizados correctamente en '{LOCAL_BACKUP_DIR}'.")
 
 def extract_media_from_specific_month():
     if not check_device():
@@ -317,8 +359,8 @@ def extract_media_from_specific_month_preserve_metadata():
             local_path = local_dir / filename
 
             # 👇 CLAVE: -a preserva fecha y hora originales
-            cmd = f'{ADB_PATH} pull -a "{remote_path}" "{local_path}"'
-            result = run_command(cmd)
+            cmd = [str(ADB_PATH), "pull", "-a", remote_path, str(local_path)]
+            result = run_command_list(cmd)
 
             if "Error" in result:
                 print(f"⚠️ Error extrayendo {filename}: {result}")
@@ -363,11 +405,10 @@ def restore_media_to_device():
 
             # Crear carpeta remota si no existe
             dir_remote = os.path.dirname(remote_path)
-            run_command(f'{ADB_PATH} shell mkdir -p "{dir_remote}"')
+            run_command_list([str(ADB_PATH), "shell", "mkdir", "-p", dir_remote])
 
             # Subir el archivo manteniendo fecha/hora (-a)
-            cmd = f'"{ADB_PATH}" push -a "{file}" "{remote_path}"'
-            result = run_command(cmd)
+            result = push_file_to_device(str(file), remote_path)
             if "error" in result.lower():
                 print(f"⚠️ Error subiendo {file.name}: {result}")
             else:
@@ -386,9 +427,8 @@ def menu():
         print("5. Copiar fotos/vídeos de una FECHA ESPECÍFICA desde la SD")
         print("6. Copiar fotos/vídeos de un MES ESPECÍFICO desde la SD")
         print("7. Copiar fotos/vídeos de un MES (CONSERVANDO FECHA/HORA)")
-        print("8. Copiar y organizar fotos/vídeos de WhatsApp")
-        print("9. Restaurar fotos/vídeos al móvil (manteniendo fechas)")
-        print("10. Salir")
+        print("8. Restaurar fotos/vídeos al móvil (manteniendo fechas)")
+        print("9. Salir")
 
         choice = input("Selecciona una opción: ")
 
