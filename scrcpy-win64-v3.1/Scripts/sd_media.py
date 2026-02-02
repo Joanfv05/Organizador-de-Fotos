@@ -185,7 +185,7 @@ def copy_and_organize_media():
     base_dir.mkdir(parents=True, exist_ok=True)
 
     # Listar archivos del dispositivo
-    print(f"📋 Listando archivos en {remote_dir}...")
+    print(f"📋 Escaneando archivos en {remote_dir}...")
     files = list_files_on_device(remote_dir)
     
     if not files:
@@ -193,6 +193,7 @@ def copy_and_organize_media():
         return
 
     # Filtrar archivos por año
+    print("🔍 Filtrando archivos por año...")
     files_to_copy = []
     for filename in files:
         # Ignorar archivos trashed
@@ -221,16 +222,37 @@ def copy_and_organize_media():
 
     print(f"📥 Encontrados {len(files_to_copy)} archivos del año {year_selected}.")
     print("⏳ Copiando y organizando...")
+    print()
 
-    total_copied = 0
-    for filename in files_to_copy:
+    # Función para mostrar barra de progreso
+    def show_progress_bar(completed, total, width=50):
+        percent = completed / total
+        filled = int(width * percent)
+        bar = "█" * filled + "░" * (width - filled)
+        percentage = f"{percent:.1%}"
+        return f"[{bar}] {percentage} ({completed}/{total})"
+
+    total_files = len(files_to_copy)
+    copied_files = {}
+    
+    # Contar archivos por mes para estadísticas
+    month_stats = {}
+    
+    # Copiar archivos con barra de progreso
+    for i, filename in enumerate(files_to_copy, 1):
         # Extraer información de fecha
         match = re.search(FILENAME_DATE_REGEX, filename)
         date_str = match.group(1)
         
         # Crear estructura de carpetas
         month_number = int(date_str[4:6])
-        month_folder = f"{month_number:02d}-{MESES_ES[month_number]}"
+        month_name = MESES_ES[month_number]
+        month_folder = f"{month_number:02d}-{month_name}"
+        
+        # Actualizar estadísticas
+        if month_folder not in month_stats:
+            month_stats[month_folder] = 0
+        month_stats[month_folder] += 1
         
         destination_folder = base_dir / year_selected / month_folder
         destination_folder.mkdir(parents=True, exist_ok=True)
@@ -253,13 +275,37 @@ def copy_and_organize_media():
         pull_result = pull_file_from_device(remote_path, local_path)
         
         if "Error" in pull_result:
-            print(f"⚠️ Error copiando {filename}: {pull_result}")
+            print(f"\r⚠️ Error copiando {filename}")
+            # Mostrar barra de progreso actualizada
+            print(f"\r{show_progress_bar(i, total_files)}", end="")
         else:
-            total_copied += 1
-            print(f"✅ {filename} copiado a {month_folder}")
+            # Guardar archivo copiado para resumen
+            if month_folder not in copied_files:
+                copied_files[month_folder] = []
+            copied_files[month_folder].append(filename)
+            
+            # Mostrar barra de progreso
+            print(f"\r{show_progress_bar(i, total_files)}", end="")
 
-    print(f"\n🎉 Proceso completado.")
-    print(f"📁 {total_copied} archivos del año {year_selected} organizados correctamente en '{LOCAL_BACKUP_DIR}'.")
+    # Línea en blanco después de la barra de progreso
+    print("\n")
+    
+    # Mostrar resumen detallado
+    print("📊 RESUMEN DE COPIA:")
+    print("-" * 50)
+    
+    total_copied = sum(len(files) for files in copied_files.values())
+    
+    for month_folder, file_list in sorted(copied_files.items()):
+        print(f"📁 {month_folder}: {len(file_list)} archivos")
+    
+    print("-" * 50)
+    print(f"🎉 Total: {total_copied} archivos copiados exitosamente")
+    
+    if total_copied < total_files:
+        print(f"⚠️  {total_files - total_copied} archivos no se pudieron copiar")
+    
+    print(f"📁 Archivos organizados en: '{LOCAL_BACKUP_DIR}/{year_selected}/'")
 
 def extract_media_from_specific_month():
     if not check_device():
