@@ -162,6 +162,11 @@ def copy_and_organize_media():
 
     Path(LOCAL_BACKUP_DIR).mkdir(parents=True, exist_ok=True)
 
+    year_selected = input("📅 Introduce el AÑO a organizar (YYYY): ").strip()
+    if not (year_selected.isdigit() and len(year_selected) == 4):
+        print("❌ Año inválido.")
+        return
+
     print(f"📥 Copiando archivos desde {sd_camera_path} a '{LOCAL_BACKUP_DIR}'...")
     result = run_command(f'{ADB_PATH} pull "{sd_camera_path}" "{LOCAL_BACKUP_DIR}"')
     print("Resultado adb pull:", result)
@@ -175,33 +180,43 @@ def copy_and_organize_media():
     for ext in MEDIA_EXTENSIONS:
         files_to_move.extend(source.rglob(f"*{ext}"))
 
+    total = 0
     for file in files_to_move:
-        if file.is_file():
-            match = re.search(FILENAME_DATE_REGEX, file.stem)
+        if not file.is_file():
+            continue
 
-            if match:
-                date_str = match.group(1)
-                month_number = int(date_str[4:6])
-                folder_name = f"{month_number:02d}-{MESES_ES[month_number]}"
-                destination_folder = source / folder_name
-            else:
-                destination_folder = source / "SinFecha"
-            destination_folder.mkdir(parents=True, exist_ok=True)
-            new_path = destination_folder / file.name
+        match = re.search(FILENAME_DATE_REGEX, file.stem)
+        if not match:
+            continue
 
-            if new_path.exists():
-                base = file.stem
-                ext = file.suffix
-                counter = 1
-                while new_path.exists():
-                    new_path = destination_folder / f"{base}_{counter}{ext}"
-                    counter += 1
+        date_str = match.group(1)
+        year = date_str[:4]
 
-            shutil.move(str(file), new_path)
+        # 👉 SOLO el año elegido
+        if year != year_selected:
+            continue
 
+        month_number = int(date_str[4:6])
+        month_folder = f"{month_number:02d}-{MESES_ES[month_number]}"
 
+        destination_folder = source / year_selected / month_folder
+        destination_folder.mkdir(parents=True, exist_ok=True)
 
-    print(f"✅ Archivos organizados por mes en '{LOCAL_BACKUP_DIR}'.")
+        new_path = destination_folder / file.name
+
+        # Evitar sobrescrituras
+        if new_path.exists():
+            base = file.stem
+            ext = file.suffix
+            counter = 1
+            while new_path.exists():
+                new_path = destination_folder / f"{base}_{counter}{ext}"
+                counter += 1
+
+        shutil.move(str(file), new_path)
+        total += 1
+
+    print(f"✅ {total} archivos del año {year_selected} organizados correctamente.")
 
 def copy_and_organize_whatsapp_media():
     if not check_device():
@@ -424,7 +439,7 @@ def menu():
         print("\n--- MONITORIZAR MÓVIL ANDROID ---")
         print("1. Verificar dispositivo")
         print("2. Iniciar scrcpy")
-        print("3. Copiar y organizar fotos/vídeos (SD Card completa)")
+        print("3. Copiar y organizar fotos/vídeos por AÑO y MES (SD Card completa)")
         print("4. Copiar SOLO fotos y vídeos de HOY desde la SD")
         print("5. Copiar fotos/vídeos de una FECHA ESPECÍFICA desde la SD")
         print("6. Copiar fotos/vídeos de un MES ESPECÍFICO desde la SD")
